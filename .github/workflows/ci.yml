@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (lint + tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hamster
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hamster"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://app_rw:app_pw@localhost:5432/hamster
+      DATABASE_SUPERUSER_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/hamster
+      APP_DB_USER: app_rw
+      APP_DB_PASSWORD: app_pw
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-secret-com-mais-de-32-caracteres-aqui
+      SEED_DEMO: "false"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install ".[dev]"
+      - name: Lint (ruff)
+        run: ruff check src tests
+      - name: Bootstrap database (schemas + RLS)
+        run: python -m src.bootstrap
+      - name: Tests (unit + integration)
+        run: pytest tests -q
+
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
